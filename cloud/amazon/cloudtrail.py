@@ -52,7 +52,23 @@ options:
     required: false
     default: false
     choices: ["true", "false"]
-
+  sns_topic_name:
+    description:
+      - sns topic arn that cloud trail will use to notify of log file delivery.
+    required: false
+  cloud_watch_logs_log_group_arn:
+    description:
+      - The log group arn where cloud trail log files will be delivered.  Needed if
+        cloud_watch_logs_role_arn is defined.
+    required: false
+  cloud_watch_logs_role_arn
+    description:
+      - The role for cloudwatch logs.
+    required: false
+  cloud_watch_logs_role_arn
+    description:
+      - The role for cloudwatch logs.
+    required: false
   aws_secret_key:
     description:
       - AWS secret key. If not set then the value of the AWS_SECRET_KEY environment variable is used.
@@ -79,17 +95,40 @@ extends_documentation_fragment: aws
 
 EXAMPLES = """
   - name: enable cloudtrail
-    local_action: cloudtrail
-      state=enabled name=main s3_bucket_name=ourbucket
-      s3_key_prefix=cloudtrail region=us-east-1
+    local_action:
+      module: cloudtrail
+      state: enabled
+      name: "Default"
+      s3_bucket_name: "ourbucket"
+      s3_key_prefix: "cloudtrail"
+      region: "us-east-1"
 
   - name: enable cloudtrail with different configuration
-    local_action: cloudtrail
-      state=enabled name=main s3_bucket_name=ourbucket2
-      s3_key_prefix='' region=us-east-1
+    local_action:
+      module: cloudtrail
+      state: enabled
+      name: "Default"
+      s3_bucket_name: "ourbucket2"
+      s3_key_prefix: ""
+      region: "us-east-1"
+
+  - name: enable cloudtrail with sns topic and cloudwatch settings
+    local_action:
+      module: cloudtrail
+      name: Default
+      s3_bucket_name: "ourbucket2"
+      s3_key_prefix: ""
+      region: "us-east-1"
+      sns_topic_name: "arn:aws:sns:us-east-1:XXXXXXXXXX:cloudtrail_sns
+      cloud_watch_logs_log_group_arn: "arn:aws:logs:us-east-1:XXXXXXXXXX:log-group:cloudtrail_logs:*"
+      cloud_watch_logs_role_arn: "arn:aws:iam::XXXXXXXXXX:role/cloudtrail_log_role"
 
   - name: remove cloudtrail
-    local_action: cloudtrail state=disabled name=main region=us-east-1
+    local_action:
+      module: cloudtrail
+      state: disabled
+      name: "Default"
+      region: "us-east-1"
 """
 
 HAS_BOTO = False
@@ -122,19 +161,18 @@ class CloudTrailManager:
         ret = self.conn.describe_trails(trail_name_list=[name])
         trailList = ret.get('trailList', [])
         if len(trailList) == 1:
-          return trailList[0]
+            return trailList[0]
         return None
 
     def exists(self, name=None):
         ret = self.view(name)
         if ret:
-          return True
+            return True
         return False
 
     def enable_logging(self, name):
         '''Turn on logging for a cloudtrail that already exists. Throws Exception on error.'''
         self.conn.start_logging(name)
-
 
     def enable(self, **create_args):
         return self.conn.create_trail(**create_args)
@@ -146,24 +184,34 @@ class CloudTrailManager:
         '''Delete a given cloudtrial configuration. Throws Exception on error.'''
         self.conn.delete_trail(name)
 
+    def check_results_value(self, results, key, value):
+        if key in results:
+            if results[key] != value:
+                return True
+        elif value:
+            return True
+        return False
 
 
 def main():
 
     argument_spec = ec2_argument_spec()
     argument_spec.update(dict(
-        state={'required': True, 'choices': ['enabled', 'disabled'] },
-        name={'required': True, 'type': 'str' },
-        s3_bucket_name={'required': False, 'type': 'str' },
-        s3_key_prefix={'default':'', 'required': False, 'type': 'str' },
-        include_global_events={'default':True, 'required': False, 'type': 'bool' },
+        state={'required': True, 'choices': ['enabled', 'disabled']},
+        name={'required': True, 'type': 'str'},
+        s3_bucket_name={'required': False, 'type': 'str'},
+        s3_key_prefix={'default': None, 'required': False, 'type': 'str'},
+        sns_topic_name={'default': None, 'required': False, 'type': 'str' },
+        include_global_events={'default':True, 'required': False, 'type': 'bool'},
+        cloud_watch_logs_log_group_arn={'default': None, 'required': False, 'type': 'str' },
+        cloud_watch_logs_role_arn={'default': None, 'required': False, 'type': 'str' },
     ))
     required_together = ( ['state', 's3_bucket_name'] )
 
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True, required_together=required_together)
 
     if not HAS_BOTO:
-      module.fail_json(msg='boto is required.')
+        module.fail_json(msg='boto is required.')
 
     ec2_url, access_key, secret_key, region = get_ec2_creds(module)
     aws_connect_params = dict(aws_access_key_id=access_key,
@@ -175,11 +223,11 @@ def main():
     ct_name = module.params['name']
     s3_bucket_name = module.params['s3_bucket_name']
     # remove trailing slash from the key prefix, really messes up the key structure.
-    s3_key_prefix = module.params['s3_key_prefix'].rstrip('/')
+    s3_key_prefix = module.params['s3_key_prefix'].rstrip('/') if module.params['s3_key_prefix'] else None
+    sns_topic_name = module.params['sns_topic_name']
     include_global_events = module.params['include_global_events']
-
-    #if module.params['state'] == 'present' and 'ec2_elbs' not in module.params:
-    #    module.fail_json(msg="ELBs are required for registration or viewing")
+    cloud_watch_logs_log_group_arn = module.params['cloud_watch_logs_log_group_arn']
+    cloud_watch_logs_role_arn = module.params['cloud_watch_logs_role_arn']
 
     cf_man = CloudTrailManager(module, region=region, **aws_connect_params)
 
@@ -189,17 +237,43 @@ def main():
         if results['exists']:
             results['view'] = cf_man.view(ct_name)
             # only update if the values have changed.
-            if results['view']['S3BucketName']              != s3_bucket_name or \
-              results['view']['S3KeyPrefix']                != s3_key_prefix  or \
-              results['view']['IncludeGlobalServiceEvents'] != include_global_events:
+            update_params = {}
+            if cf_man.check_results_value(results['view'], 'S3BucketName', s3_bucket_name):
+                update_params['s3_bucket_name'] = s3_bucket_name
+
+            if cf_man.check_results_value(results['view'], 'S3KeyPrefix', s3_key_prefix):
+                update_params['s3_key_prefix'] = s3_key_prefix
+
+            if cf_man.check_results_value(results['view'], 'SnsTopicName', sns_topic_name):
+                update_params['sns_topic_name'] = sns_topic_name
+
+            if cf_man.check_results_value(results['view'], 'IncludeGlobalServiceEvents', include_global_events):
+                update_params['include_global_service_events'] = include_global_events
+
+            if cf_man.check_results_value(results['view'], 'CloudWatchLogsLogGroupArn', cloud_watch_logs_log_group_arn):
+                update_params['cloud_watch_logs_log_group_arn'] = cloud_watch_logs_log_group_arn
+
+            if cf_man.check_results_value(results['view'], 'CloudWatchLogsRoleArn', cloud_watch_logs_role_arn):
+                update_params['cloud_watch_logs_role_arn'] = cloud_watch_logs_role_arn
+
+            if update_params:
+                update_params['name'] = ct_name
+                results['params'] = update_params
                 if not module.check_mode:
-                    results['update'] = cf_man.update(name=ct_name, s3_bucket_name=s3_bucket_name, s3_key_prefix=s3_key_prefix, include_global_service_events=include_global_events)
+                    results['update'] = cf_man.update(**update_params)
                 results['changed'] = True
         else:
             if not module.check_mode:
                 # doesn't exist. create it.
-                results['enable'] = cf_man.enable(name=ct_name, s3_bucket_name=s3_bucket_name, s3_key_prefix=s3_key_prefix, include_global_service_events=include_global_events)
-            results['changed'] = True
+                results['enable'] = cf_man.enable(name=ct_name,
+                                                  s3_bucket_name=s3_bucket_name,
+                                                  s3_key_prefix=s3_key_prefix,
+                                                  include_global_service_events=include_global_events,
+                                                  sns_topic_name=sns_topic_name,
+                                                  cloud_watch_logs_log_group_arn=cloud_watch_logs_log_group_arn,
+                                                  cloud_watch_logs_role_arn=cloud_watch_logs_role_arn)
+            if results['enable']:
+                results['changed'] = True
 
         # given cloudtrail should exist now. Enable the logging.
         results['view_status'] = cf_man.view_status(ct_name)
