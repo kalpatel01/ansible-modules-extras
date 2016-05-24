@@ -119,7 +119,7 @@ EXAMPLES = """
       s3_bucket_name: "ourbucket2"
       s3_key_prefix: ""
       region: "us-east-1"
-      sns_topic_name: "arn:aws:sns:us-east-1:XXXXXXXXXX:cloudtrail_sns
+      sns_topic_name: "arn:aws:sns:us-east-1:XXXXXXXXXX:cloudtrail_sns"
       cloud_watch_logs_log_group_arn: "arn:aws:logs:us-east-1:XXXXXXXXXX:log-group:cloudtrail_logs:*"
       cloud_watch_logs_role_arn: "arn:aws:iam::XXXXXXXXXX:role/cloudtrail_log_role"
 
