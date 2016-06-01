@@ -56,19 +56,18 @@ options:
     description:
       - sns topic arn that cloud trail will use to notify of log file delivery.
     required: false
+    version_added: "2.2"
   cloud_watch_logs_log_group_arn:
     description:
       - The log group arn where cloud trail log files will be delivered.  Needed if
         cloud_watch_logs_role_arn is defined.
     required: false
+    version_added: "2.2"
   cloud_watch_logs_role_arn:
     description:
       - The role for cloudwatch logs.
     required: false
-  cloud_watch_logs_role_arn:
-    description:
-      - The role for cloudwatch logs.
-    required: false
+    version_added: "2.2"
   aws_secret_key:
     description:
       - AWS secret key. If not set then the value of the AWS_SECRET_KEY environment variable is used.
