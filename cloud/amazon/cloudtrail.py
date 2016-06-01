@@ -61,11 +61,11 @@ options:
       - The log group arn where cloud trail log files will be delivered.  Needed if
         cloud_watch_logs_role_arn is defined.
     required: false
-  cloud_watch_logs_role_arn
+  cloud_watch_logs_role_arn:
     description:
       - The role for cloudwatch logs.
     required: false
-  cloud_watch_logs_role_arn
+  cloud_watch_logs_role_arn:
     description:
       - The role for cloudwatch logs.
     required: false
